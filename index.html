@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Acá falta un gobernador — Mapa de reclamos del AMM</title>
+
+<!-- ============================================================
+     MAPA COLABORATIVO DE RECLAMOS CIUDADANOS — PROTOTIPO
+     Adaptación del concepto "Acá falta un intendente"
+     Área Metropolitana de Mendoza (AMM)
+     ------------------------------------------------------------
+     ESTADO ACTUAL: los reclamos se guardan EN MEMORIA (demo).
+     Al recargar la página se reinician a los ejemplos sembrados.
+
+     PARA PRODUCCIÓN (datos compartidos entre todos los ciudadanos)
+     hay que conectar un backend. Ver bloque "BACKEND / SUPABASE"
+     más abajo en el <script>. Es lo único que falta para que sea
+     un sitio público real.
+     ============================================================ -->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+
+<style>
+  :root{
+    --navy-900:#06121f;
+    --navy-800:#0a1c30;
+    --navy-700:#0f2742;
+    --navy-600:#163455;
+    --navy-line:#23456b;
+    --azul:#6fa8ff;       /* no-me-olvides */
+    --azul-soft:#9cc2ff;
+    --oro:#f2c14e;
+    --oro-soft:#ffd97a;
+    --texto:#eaf1fb;
+    --texto-mute:#9db4cf;
+    --rojo:#f25c54;
+    --ok:#43c59e;
+    --shadow:0 18px 50px -12px rgba(0,0,0,.65);
+  }
+
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    font-family:'Barlow',system-ui,sans-serif;
+    background:var(--navy-900);
+    color:var(--texto);
+    overflow:hidden;
+  }
+
+  /* ---------- LAYOUT ---------- */
+  .app{
+    display:grid;
+    grid-template-columns:380px 1fr;
+    grid-template-rows:auto 1fr;
+    grid-template-areas:
+      "header header"
+      "side   map";
+    height:100vh;
+  }
+
+  header{
+    grid-area:header;
+    background:linear-gradient(100deg,var(--navy-800),var(--navy-700));
+    border-bottom:1px solid var(--navy-line);
+    padding:14px 22px;
+    display:flex;align-items:center;gap:16px;
+    z-index:20;
+  }
+  .brand{display:flex;align-items:center;gap:13px}
+  .titles h1{
+    font-family:'Barlow Condensed',sans-serif;
+    font-weight:800;font-size:25px;letter-spacing:.5px;
+    margin:0;line-height:.95;text-transform:uppercase;
+  }
+  .titles h1 .acc{color:var(--azul)}
+  .titles p{
+    margin:2px 0 0;font-size:12.5px;color:var(--texto-mute);
+    letter-spacing:.3px;
+  }
+  header .spacer{flex:1}
+  .stat{
+    text-align:right;font-family:'Barlow Condensed',sans-serif;
+    line-height:1;
+  }
+  .stat .n{font-size:34px;font-weight:800;color:var(--oro)}
+  .stat .l{font-size:11px;color:var(--texto-mute);text-transform:uppercase;letter-spacing:1px}
+
+  /* ---------- SIDEBAR ---------- */
+  aside{
+    grid-area:side;
+    background:var(--navy-800);
+    border-right:1px solid var(--navy-line);
+    display:flex;flex-direction:column;
+    min-height:0;
+  }
+  .cta{
+    margin:16px;padding:15px 16px;border:none;border-radius:13px;
+    background:linear-gradient(135deg,var(--azul),#3f7fe0);
+    color:#06121f;font-family:'Barlow Condensed',sans-serif;
+    font-weight:800;font-size:18px;letter-spacing:.5px;text-transform:uppercase;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;
+    box-shadow:0 8px 22px -6px rgba(111,168,255,.55);
+    transition:transform .12s ease, box-shadow .12s ease;
+  }
+  .cta:hover{transform:translateY(-2px);box-shadow:0 12px 28px -6px rgba(111,168,255,.7)}
+  .cta:active{transform:translateY(0)}
+
+  .filters{padding:0 16px 12px}
+  .filters .label{
+    font-size:11px;text-transform:uppercase;letter-spacing:1.2px;
+    color:var(--texto-mute);margin:6px 0 9px;font-weight:600;
+  }
+  .chips{display:flex;flex-wrap:wrap;gap:7px}
+  .chip{
+    display:inline-flex;align-items:center;gap:6px;
+    padding:6px 11px;border-radius:30px;cursor:pointer;
+    font-size:12.5px;font-weight:600;
+    background:var(--navy-700);border:1px solid var(--navy-line);
+    color:var(--texto-mute);transition:all .14s ease;user-select:none;
+  }
+  .chip .dot{width:9px;height:9px;border-radius:50%}
+  .chip.active{color:var(--texto);border-color:var(--azul);background:var(--navy-600)}
+  .chip:hover{color:var(--texto)}
+
+  .listhead{
+    padding:12px 16px 8px;font-family:'Barlow Condensed',sans-serif;
+    font-size:14px;letter-spacing:1px;text-transform:uppercase;color:var(--texto-mute);
+    border-top:1px solid var(--navy-line);
+  }
+  .list{flex:1;overflow-y:auto;padding:0 12px 16px;min-height:0}
+  .card{
+    background:var(--navy-700);border:1px solid var(--navy-line);
+    border-left-width:4px;border-radius:11px;padding:11px 13px;margin:8px 4px;
+    cursor:pointer;transition:transform .12s ease,border-color .12s ease;
+  }
+  .card:hover{transform:translateX(3px);border-color:var(--azul)}
+  .card .tag{
+    font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+    display:inline-flex;align-items:center;gap:5px;margin-bottom:5px;
+  }
+  .card .tag .dot{width:8px;height:8px;border-radius:50%}
+  .card h4{margin:0 0 3px;font-size:15px;font-weight:600;font-family:'Barlow Condensed',sans-serif;letter-spacing:.3px}
+  .card p{margin:0;font-size:12.5px;color:var(--texto-mute);line-height:1.35;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .card .meta{margin-top:7px;font-size:11px;color:#6f88a6}
+
+  /* ---------- MAP ---------- */
+  #map{grid-area:map;height:100%;width:100%;background:#e9ebee;z-index:1}
+  .leaflet-container{background:#e9ebee}
+  .map-hint{
+    position:absolute;top:14px;left:50%;transform:translateX(-50%);
+    background:var(--oro);color:#06121f;font-weight:700;font-size:14px;
+    padding:9px 18px;border-radius:30px;z-index:600;
+    font-family:'Barlow Condensed',sans-serif;letter-spacing:.5px;
+    box-shadow:var(--shadow);display:none;align-items:center;gap:8px;
+    animation:pulse 1.6s infinite;
+  }
+  @keyframes pulse{0%,100%{transform:translateX(-50%) scale(1)}50%{transform:translateX(-50%) scale(1.04)}}
+
+  /* ---------- MODAL ---------- */
+  .overlay{
+    position:fixed;inset:0;background:rgba(4,10,18,.72);backdrop-filter:blur(3px);
+    display:none;align-items:center;justify-content:center;z-index:1000;padding:18px;
+  }
+  .overlay.open{display:flex}
+  .modal{
+    width:min(460px,100%);background:var(--navy-800);border:1px solid var(--navy-line);
+    border-radius:18px;box-shadow:var(--shadow);overflow:hidden;
+    animation:rise .25s cubic-bezier(.2,.8,.2,1);
+  }
+  @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+  .modal .mhead{
+    padding:16px 20px;background:linear-gradient(100deg,var(--navy-700),var(--navy-600));
+    border-bottom:1px solid var(--navy-line);display:flex;align-items:center;justify-content:space-between;
+  }
+  .modal .mhead h3{margin:0;font-family:'Barlow Condensed',sans-serif;font-size:21px;font-weight:800;text-transform:uppercase;letter-spacing:.6px}
+  .modal .x{background:none;border:none;color:var(--texto-mute);font-size:24px;cursor:pointer;line-height:1}
+  .modal .mbody{padding:18px 20px 4px}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--texto-mute);margin-bottom:6px;font-weight:600}
+  .field input,.field select,.field textarea{
+    width:100%;background:var(--navy-700);border:1px solid var(--navy-line);
+    border-radius:10px;padding:11px 12px;color:var(--texto);font-family:inherit;font-size:14px;
+    transition:border-color .14s ease;
+  }
+  .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--azul)}
+  .field textarea{resize:vertical;min-height:74px}
+  .loc-pick{
+    display:flex;align-items:center;gap:10px;background:var(--navy-700);
+    border:1px dashed var(--navy-line);border-radius:10px;padding:11px 12px;font-size:13px;color:var(--texto-mute);
+  }
+  .loc-pick.set{border-style:solid;border-color:var(--ok);color:var(--texto)}
+  .loc-pick button{
+    margin-left:auto;background:var(--azul);color:#06121f;border:none;border-radius:8px;
+    padding:7px 12px;font-weight:700;cursor:pointer;font-size:12.5px;
+  }
+  .mfoot{padding:6px 20px 20px;display:flex;gap:10px}
+  .btn-send{
+    flex:1;background:linear-gradient(135deg,var(--oro),var(--oro-soft));color:#06121f;border:none;border-radius:11px;
+    padding:13px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;text-transform:uppercase;letter-spacing:.6px;cursor:pointer;
+    transition:transform .12s ease;
+  }
+  .btn-send:hover{transform:translateY(-2px)}
+  .btn-send:disabled{opacity:.45;cursor:not-allowed;transform:none}
+
+  /* Leaflet popup theming */
+  .leaflet-popup-content-wrapper{background:var(--navy-700);color:var(--texto);border-radius:12px;border:1px solid var(--navy-line)}
+  .leaflet-popup-tip{background:var(--navy-700)}
+  .leaflet-popup-content{margin:12px 15px;font-family:'Barlow',sans-serif}
+  .pop .ptag{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;display:inline-flex;align-items:center;gap:5px}
+  .pop .ptag .dot{width:8px;height:8px;border-radius:50%}
+  .pop h4{margin:5px 0 4px;font-family:'Barlow Condensed',sans-serif;font-size:17px}
+  .pop p{margin:0;font-size:13px;color:var(--texto-mute);line-height:1.4}
+  .pop .pmeta{margin-top:7px;font-size:11px;color:#6f88a6}
+
+  .pin{display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 3px 8px rgba(0,0,0,.5);border:2px solid rgba(255,255,255,.85)}
+  .pin span{transform:rotate(45deg);width:7px;height:7px;background:#fff;border-radius:50%}
+
+  /* ---------- RESPONSIVE ---------- */
+  @media(max-width:820px){
+    .app{grid-template-columns:1fr;grid-template-rows:auto 44vh 1fr;
+      grid-template-areas:"header" "map" "side"}
+    aside{border-right:none;border-top:1px solid var(--navy-line)}
+    .stat{display:none}
+  }
+  .list::-webkit-scrollbar{width:8px}
+  .list::-webkit-scrollbar-thumb{background:var(--navy-600);border-radius:8px}
+
+  .toast{
+    position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120px);
+    background:var(--ok);color:#06121f;font-weight:600;font-size:14px;
+    padding:13px 20px;border-radius:12px;z-index:2000;box-shadow:var(--shadow);
+    max-width:90%;text-align:center;transition:transform .35s cubic-bezier(.2,.8,.2,1);
+  }
+  .toast.show{transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <div class="brand">
+      <div class="titles">
+        <h1>Acá falta <span class="acc">un gobernador</span></h1>
+        <p>Mapeá los problemas de tu vida que un gobierno provincial podría resolver, en cualquier punto de Mendoza</p>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="stat"><div class="n" id="counter">0</div><div class="l">reclamos cargados</div></div>
+  </header>
+
+  <aside>
+    <button class="cta" id="openForm">+ &nbsp;Sumá tu reclamo</button>
+
+    <div class="filters">
+      <div class="label">Filtrar por tipo</div>
+      <div class="chips" id="chips"></div>
+    </div>
+
+    <div class="listhead">Reclamos recientes</div>
+    <div class="list" id="list"></div>
+  </aside>
+
+  <div style="grid-area:map;position:relative">
+    <div id="map"></div>
+    <div class="map-hint" id="mapHint">📍 Tocá el mapa para ubicar tu reclamo</div>
+  </div>
+</div>
+
+<!-- MODAL DE CARGA -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="mhead">
+      <h3>Sumá tu reclamo</h3>
+      <button class="x" id="closeForm">&times;</button>
+    </div>
+    <div class="mbody">
+      <div class="field">
+        <label>Ubicación en el mapa</label>
+        <div class="loc-pick" id="locPick">
+          <span id="locText">Sin ubicar todavía</span>
+          <button type="button" id="pickBtn">Marcar en el mapa</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Tipo de problema</label>
+        <select id="fCat"></select>
+      </div>
+      <div class="field">
+        <label>Título corto</label>
+        <input id="fTitle" maxlength="70" placeholder="Ej: Calle sin asfaltar hace años">
+      </div>
+      <div class="field">
+        <label>Descripción</label>
+        <textarea id="fDesc" maxlength="400" placeholder="Contá qué pasa y desde cuándo…"></textarea>
+      </div>
+      <div class="field">
+        <label>Localidad / departamento</label>
+        <input id="fBarrio" maxlength="60" placeholder="Ej: San Rafael, Tunuyán, Las Heras…">
+      </div>
+      <div class="field">
+        <label>Tu nombre (opcional)</label>
+        <input id="fName" maxlength="50" placeholder="Vecino/a anónimo/a">
+      </div>
+    </div>
+    <div class="mfoot">
+      <button class="btn-send" id="sendBtn" disabled>Publicar reclamo</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+if (typeof L === 'undefined') {
+  document.getElementById('map').innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:30px;text-align:center;color:#9db4cf;font-family:Barlow,sans-serif">'
+    + 'No se pudo cargar la librería del mapa.<br>Verificá tu conexión a internet (el mapa se descarga de un CDN) y volvé a abrir la página.</div>';
+}
+</script>
+<script>
+/* ============================================================
+   CONFIGURACIÓN DE CATEGORÍAS
+   ============================================================ */
+const CATS = {
+  seguridad:  {label:'Seguridad',                      color:'#c1121f'},
+  salud:      {label:'Salud pública',                  color:'#2a9d8f'},
+  educacion:  {label:'Educación',                      color:'#ee9b00'},
+  obra:       {label:'Obra pública e infraestructura', color:'#5e548e'},
+  agua:       {label:'Agua y riego',                   color:'#1e6091'},
+  transporte: {label:'Transporte',                     color:'#d4569a'},
+  economia:   {label:'Empleo y economía',              color:'#588157'},
+  vivienda:   {label:'Vivienda y hábitat',             color:'#9c6644'},
+  otro:       {label:'Otro',                           color:'#7d8597'},
+};
+
+/* ============================================================
+   CAPA DE DATOS  ▸  BACKEND: GOOGLE SHEETS (vía Apps Script)
+   ------------------------------------------------------------
+   1) PEGÁ ACÁ ABAJO la URL del web app que termina en /exec
+      (la obtenés al desplegar el Apps Script — ver archivo Code.gs).
+   2) Mientras WEB_APP_URL siga vacía o con el placeholder, el mapa
+      funciona con los reclamos de ejemplo (modo demo).
+   3) Los reclamos nuevos entran como 'pendiente' y NO se ven en el
+      mapa hasta que vos los aprobés en la planilla (estado=aprobado).
+   ============================================================ */
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyoaBWWm7H1sq4c0ebKnN4KkMfOZoEarF3Ke53mFHL-KtDIaWe78gZdTUKp_I5ygdAY/exec';
+
+// Reclamos de ejemplo (solo se usan en modo demo, sin URL configurada)
+const SEEDS = [
+  {id:1, cat:'salud',      lat:-32.889, lng:-68.857, title:'Guardia del hospital saturada', desc:'Esperás horas para que te atiendan y faltan médicos en la guardia.', barrio:'Hospital provincial, Capital', name:'Paciente de la zona', date:'hace 2 días'},
+  {id:2, cat:'educacion',  lat:-32.900, lng:-68.840, title:'Escuela sin calefacción en invierno', desc:'Los chicos cursan con frío, hace meses que esperan que arreglen las estufas.', barrio:'Capital', name:'Madre de la escuela', date:'hace 3 días'},
+  {id:3, cat:'seguridad',  lat:-32.905, lng:-68.800, title:'Casi no hay patrullaje', desc:'Aumentaron los robos en el barrio y los móviles policiales no pasan.', barrio:'Dorrego, Guaymallén', name:'', date:'hace 4 días'},
+  {id:4, cat:'obra',       lat:-32.955, lng:-68.865, title:'Ruta provincial llena de pozos', desc:'El asfalto está destrozado y nadie lo repara hace años.', barrio:'Godoy Cruz', name:'', date:'hace 5 días'},
+  {id:5, cat:'agua',       lat:-33.035, lng:-68.882, title:'Cortes de agua y problemas de riego', desc:'Nos quedamos sin agua varios días y el riego no llega en tiempo a las fincas.', barrio:'Luján de Cuyo', name:'Productor de la zona', date:'hace 1 semana'},
+  {id:6, cat:'transporte', lat:-32.978, lng:-68.790, title:'El interurbano dejó de pasar', desc:'Recortaron las frecuencias y ahora es imposible llegar al trabajo a horario.', barrio:'Maipú', name:'', date:'hace 1 semana'},
+  {id:7, cat:'salud',      lat:-34.617, lng:-68.330, title:'Hospital sin especialistas', desc:'Para ver a un especialista hay que viajar a Mendoza capital, no hay turnos acá.', barrio:'San Rafael', name:'', date:'hace 1 semana'},
+  {id:8, cat:'agua',       lat:-33.576, lng:-69.020, title:'Falta de agua para riego en las fincas', desc:'La temporada se complica sin agua y peligran las cosechas de la zona.', barrio:'Tunuyán, Valle de Uco', name:'Productor frutícola', date:'hace 2 semanas'},
+  {id:9, cat:'obra',       lat:-35.475, lng:-69.584, title:'Ruta cortada por el temporal', desc:'Hace semanas que un tramo está intransitable y nadie viene a repararlo.', barrio:'Malargüe', name:'', date:'hace 2 semanas'},
+];
+
+let reclamos = [];
+const isLive = () => WEB_APP_URL && WEB_APP_URL.indexOf('PEGÁ') === -1;
+
+function relTime(iso){
+  if(!iso) return '';
+  const diff = (Date.now() - new Date(iso).getTime())/1000;
+  if(diff < 90)        return 'recién';
+  if(diff < 3600)      return `hace ${Math.round(diff/60)} min`;
+  if(diff < 86400)     return `hace ${Math.round(diff/3600)} h`;
+  if(diff < 604800)    return `hace ${Math.round(diff/86400)} días`;
+  return `hace ${Math.round(diff/604800)} sem`;
+}
+
+async function loadReclamos(){
+  if(!isLive()) return SEEDS;                 // modo demo
+  try{
+    const res = await fetch(WEB_APP_URL);     // GET → solo aprobados
+    const data = await res.json();
+    return data.map(r => ({...r, lat:Number(r.lat), lng:Number(r.lng), date:relTime(r.created_at)}));
+  }catch(err){
+    console.error('No se pudo leer la planilla:', err);
+    return [];
+  }
+}
+
+async function saveReclamo(r){
+  if(isLive()){
+    // POST como text/plain para evitar el preflight CORS de Apps Script
+    try{
+      await fetch(WEB_APP_URL, {
+        method:'POST',
+        headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body: JSON.stringify(r)
+      });
+    }catch(err){ console.error('No se pudo guardar:', err); }
+  }
+  // Mostrado optimista en la sesión (en producción quedará "en revisión")
+  r.id = Date.now();
+  r.date = isLive() ? 'en revisión' : 'recién';
+  reclamos.unshift(r);
+  return r;
+}
+
+/* ===== MAPA ===== */
+const map = L.map('map', {zoomControl:true});
+// Encuadre inicial: toda la provincia de Mendoza
+map.fitBounds([[-37.6, -70.6], [-32.0, -66.3]], {padding:[20,20]});
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution:'&copy; OpenStreetMap &copy; CARTO', maxZoom:19
+}).addTo(map);
+
+let markers = [];
+function makeIcon(color){
+  return L.divIcon({
+    className:'', html:`<div class="pin" style="background:${color}"><span></span></div>`,
+    iconSize:[26,26], iconAnchor:[13,24], popupAnchor:[0,-22]
+  });
+}
+
+let activeFilters = new Set(Object.keys(CATS));
+
+function render(){
+  // limpiar marcadores
+  markers.forEach(m=>map.removeLayer(m)); markers=[];
+  const visible = reclamos.filter(r=>activeFilters.has(r.cat));
+
+  // marcadores
+  visible.forEach(r=>{
+    const c = CATS[r.cat]?.color || '#adb5bd';
+    const m = L.marker([r.lat,r.lng],{icon:makeIcon(c)}).addTo(map);
+    m.bindPopup(`<div class="pop">
+      <span class="ptag" style="color:${c}"><span class="dot" style="background:${c}"></span>${CATS[r.cat]?.label||'Otro'}</span>
+      <h4>${esc(r.title)}</h4>
+      <p>${esc(r.desc)}</p>
+      <div class="pmeta">📍 ${esc(r.barrio||'Sin localidad')} · ${esc(r.name||'Anónimo')} · ${r.date||''}</div>
+    </div>`);
+    m._rid = r.id;
+    markers.push(m);
+  });
+
+  // contador
+  document.getElementById('counter').textContent = reclamos.length;
+
+  // lista
+  const list = document.getElementById('list');
+  list.innerHTML = visible.length ? '' : '<p style="color:#6f88a6;padding:14px;font-size:13px">No hay reclamos con este filtro.</p>';
+  visible.forEach(r=>{
+    const c = CATS[r.cat]?.color || '#adb5bd';
+    const div = document.createElement('div');
+    div.className='card'; div.style.borderLeftColor=c;
+    div.innerHTML=`<div class="tag" style="color:${c}"><span class="dot" style="background:${c}"></span>${CATS[r.cat]?.label||'Otro'}</div>
+      <h4>${esc(r.title)}</h4><p>${esc(r.desc)}</p>
+      <div class="meta">📍 ${esc(r.barrio||'Sin localidad')} · ${r.date||''}</div>`;
+    div.onclick=()=>{ map.flyTo([r.lat,r.lng],15); const mk=markers.find(m=>m._rid===r.id); if(mk) mk.openPopup(); };
+    list.appendChild(div);
+  });
+}
+function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+
+/* ===== FILTROS ===== */
+const chips = document.getElementById('chips');
+Object.entries(CATS).forEach(([k,v])=>{
+  const c = document.createElement('div');
+  c.className='chip active'; c.dataset.k=k;
+  c.innerHTML=`<span class="dot" style="background:${v.color}"></span>${v.label}`;
+  c.onclick=()=>{
+    if(activeFilters.has(k)){activeFilters.delete(k);c.classList.remove('active')}
+    else{activeFilters.add(k);c.classList.add('active')}
+    render();
+  };
+  chips.appendChild(c);
+});
+
+/* ===== SELECT DEL FORM ===== */
+const fCat = document.getElementById('fCat');
+Object.entries(CATS).forEach(([k,v])=>{
+  const o=document.createElement('option'); o.value=k; o.textContent=v.label; fCat.appendChild(o);
+});
+
+/* ===== MODAL Y CARGA ===== */
+const overlay=document.getElementById('overlay');
+const mapHint=document.getElementById('mapHint');
+let picking=false, picked=null;
+
+document.getElementById('openForm').onclick=()=>overlay.classList.add('open');
+document.getElementById('closeForm').onclick=closeModal;
+overlay.onclick=e=>{if(e.target===overlay)closeModal()};
+function closeModal(){overlay.classList.remove('open')}
+
+document.getElementById('pickBtn').onclick=()=>{
+  overlay.classList.remove('open'); picking=true; mapHint.style.display='flex';
+  map.getContainer().style.cursor='crosshair';
+};
+map.on('click',e=>{
+  if(!picking) return;
+  picked={lat:e.latlng.lat,lng:e.latlng.lng};
+  picking=false; mapHint.style.display='none';
+  map.getContainer().style.cursor='';
+  const lp=document.getElementById('locPick');
+  lp.classList.add('set');
+  document.getElementById('locText').textContent=`Ubicado: ${picked.lat.toFixed(4)}, ${picked.lng.toFixed(4)}`;
+  overlay.classList.add('open');
+  validate();
+});
+
+const sendBtn=document.getElementById('sendBtn');
+['fCat','fTitle','fDesc'].forEach(id=>document.getElementById(id).addEventListener('input',validate));
+function validate(){
+  const ok = picked && document.getElementById('fTitle').value.trim() && document.getElementById('fDesc').value.trim();
+  sendBtn.disabled=!ok;
+}
+
+sendBtn.onclick=async()=>{
+  const r={
+    cat:fCat.value, lat:picked.lat, lng:picked.lng,
+    title:document.getElementById('fTitle').value.trim(),
+    desc:document.getElementById('fDesc').value.trim(),
+    barrio:document.getElementById('fBarrio').value.trim(),
+    name:document.getElementById('fName').value.trim(),
+  };
+  sendBtn.disabled=true; sendBtn.textContent='Publicando…';
+  await saveReclamo(r);
+  // reset
+  ['fTitle','fDesc','fBarrio','fName'].forEach(id=>document.getElementById(id).value='');
+  picked=null;
+  document.getElementById('locPick').classList.remove('set');
+  document.getElementById('locText').textContent='Sin ubicar todavía';
+  sendBtn.textContent='Publicar reclamo';
+  closeModal();
+  render();
+  map.flyTo([r.lat,r.lng],15);
+  showToast(isLive()
+    ? '¡Gracias! Tu reclamo fue enviado y aparecerá en el mapa una vez revisado.'
+    : '¡Reclamo publicado en el mapa!');
+};
+
+function showToast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),4200);
+}
+
+/* ===== INIT ===== */
+(async function(){ reclamos = await loadReclamos(); render(); })();
+</script>
+</body>
+</html>
